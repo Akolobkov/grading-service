@@ -39,3 +39,18 @@ class SubmissionResult(BaseModel):
     attempt_number: int
     submitted_at: datetime
     graded_at: datetime | None
+
+class PlagiarismMatch(BaseModel):
+    submission_id: int
+    student_external_id: str
+    task_external_id: str
+    submitted_at: datetime
+    jsd: float
+    ngram_size: int
+
+
+class PlagiarismReport(BaseModel):
+    submission_id: int
+    metric: str
+    count: int
+    matches: list[PlagiarismMatch]

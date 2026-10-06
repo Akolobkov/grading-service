@@ -3,9 +3,12 @@ from datetime import datetime, timezone
 from fastapi import Request
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
-
+from sqlalchemy import case
+from sqlalchemy import or_, select
+from app.models import PlagiarismPair
+from app.schemas import PlagiarismMatch, PlagiarismReport
 from app.config import settings
 from app.database import get_session
 from app.models import Submission
@@ -78,3 +81,61 @@ async def get_submission(
             detail=f"Submission {submission_id} not found",
         )
     return SubmissionResult.model_validate(submission, from_attributes=True)
+
+@router.get("/{submission_id}/plagiarism", response_model=PlagiarismReport)
+async def get_plagiarism_report(
+    submission_id: int,
+    db: AsyncSession = Depends(get_session),
+) -> PlagiarismReport:
+    """
+    Возвращает список сабмитов, похожих на указанный,
+    отсортированный по возрастанию JSD (самые похожие — первыми).
+    """
+    # 1. Проверяем, что сабмит существует
+    submission = await db.get(Submission, submission_id)
+    if submission is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Submission {submission_id} not found",
+        )
+
+    # 2. Псевдонимы для JOIN: нужны, чтобы присоединить "другую" сторону пары
+    other_id = case(
+        (PlagiarismPair.submission_a_id == submission_id,
+         PlagiarismPair.submission_b_id),
+        else_=PlagiarismPair.submission_a_id,
+    )
+
+    # 3. Запрос: пары, где участвует наш submission_id
+    stmt = (
+        select(PlagiarismPair, Submission)
+        .join(Submission, Submission.id == other_id)
+        .where(
+            or_(
+                PlagiarismPair.submission_a_id == submission_id,
+                PlagiarismPair.submission_b_id == submission_id,
+            )
+        )
+        .order_by(PlagiarismPair.value.asc())
+    )
+
+    rows = (await db.execute(stmt)).all()
+
+    matches = [
+        PlagiarismMatch(
+            submission_id=other.id,
+            student_external_id=other.student_external_id,
+            task_external_id=other.task_external_id,
+            submitted_at=other.submitted_at,
+            jsd=pair.value,
+            ngram_size=pair.ngram_size,
+        )
+        for pair, other in rows
+    ]
+
+    return PlagiarismReport(
+        submission_id=submission_id,
+        metric="jsd",
+        count=len(matches),
+        matches=matches,
+    )

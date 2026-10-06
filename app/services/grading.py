@@ -5,8 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.models import Submission
 from app.services import ml_adapter, parser_adapter
-
-
+import hashlib
+import json
+from app.ml.tokenizer import tokenize
 async def grade(db: AsyncSession, submission: Submission) -> None:
     """Оркестрация оценки: парсинг → ML → сохранение результата."""
     # Метрики для feedback (модель внутри тоже вызовет парсер — это её право)
@@ -26,4 +27,10 @@ async def grade(db: AsyncSession, submission: Submission) -> None:
     submission.model_version = settings.model_version
     submission.status = "graded"
     submission.graded_at = datetime.now(timezone.utc)
+    tokens = tokenize(submission.code)
+    submission.tokens = tokens
+    submission.tokens_count = len(tokens)
+    submission.tokens_hash = hashlib.sha256(
+        json.dumps(tokens, separators=(",", ":")).encode()
+    ).hexdigest()
     await db.commit()

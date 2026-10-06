@@ -3,7 +3,6 @@ from functools import lru_cache
 from app.config import settings
 from app.ml.analyzer import CodeQualityAnalyzer
 
-
 @lru_cache(maxsize=1)
 def _get_analyzer() -> CodeQualityAnalyzer:
     """Ленивая инициализация: модель грузится один раз на процесс."""
